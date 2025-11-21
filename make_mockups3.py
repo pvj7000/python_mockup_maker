@@ -1,165 +1,219 @@
 #!/usr/bin/env python3
-"""
-Make Mockups Script
+"""Generate coffee shop desk mockups for a batch of artwork files."""
 
-Folder Structure:
------------------
-project_folder/
-├── make_mockups3.py         # This script
-├── output_webp/             # Contains your input .webp images (filenames starting with "img_")
-├── overlays/                # Contains the overlay PNG files:
-│      ├── mockup_30x40_tr.png
-│      └── mockup_60x80_tr.png
-└── output2/                 # The script will create this folder (if it doesn't exist) and save output images here.
+from __future__ import annotations
 
-How to Run:
------------
-1. Ensure you have Python 3 installed.
-2. Install Pillow if needed:
-      pip install Pillow
-3. Open a terminal, navigate to project_folder, and run:
-      python3 make_mockups3.py
-"""
+import argparse
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterable
 
-import os
 from PIL import Image, ImageChops
 
-# Define folder paths
-INPUT_FOLDER = "output_webp"    # Folder containing input .webp files (filenames starting with "img_")
-OVERLAYS_FOLDER = "overlays"
-OUTPUT_FOLDER = "output2"       # Folder to save output images
+DEFAULT_INPUT_FOLDER = Path("output_webp")
+DEFAULT_OVERLAY_FOLDER = Path("overlays")
+DEFAULT_OUTPUT_FOLDER = Path("output2")
 
-# Create output folder if it doesn't exist
-if not os.path.exists(OUTPUT_FOLDER):
-    os.makedirs(OUTPUT_FOLDER)
-
-# Canvas size (same as the overlay PNG dimensions, i.e. the Photoshop file dimensions)
 CANVAS_SIZE = (5400, 7200)
-# Final exported image size and quality settings
 OUTPUT_SIZE = (1500, 2000)
 WEBP_QUALITY = 90
+SHADOW_OPACITY = 0.3
 
-# Soft blend parameter for shadows (lower value gives a softer, less dark effect)
-SHADOW_OPACITY = 0.3  # Value between 0 (no multiply) and 1 (full multiply)
 
-# Define mockup configurations.
-# artwork_width and artwork_height refer to the dimensions of the rotated artwork (as in the PS file)
-mockups = {
-    "mockup_30x40_tr": {
-         "overlay_filename": "mockup_30x40_tr.png",
-         "artwork_width": 2554,   # Target width of the rotated artwork (in the PS file)
-         "artwork_height": 3185,  # Target height of the rotated artwork (in the PS file)
-         "artwork_x": 1341,       # X position where the rotated artwork's bounding box should be placed on the canvas
-         "artwork_y": 2007,       # Y position for the rotated artwork's bounding box
-         "rotation": 7.43         # Rotation angle in degrees (clockwise)
-    },
-    "mockup_60x80_tr": {
-         "overlay_filename": "mockup_60x80_tr.png",
-         "artwork_width": 5106,
-         "artwork_height": 6374,
-         "artwork_x": 144,
-         "artwork_y": 410,
-         "rotation": 7.3
-    }
+@dataclass(frozen=True)
+class MockupConfig:
+    """Configuration for a single mockup variant."""
+
+    overlay_filename: str
+    artwork_width: int
+    artwork_height: int
+    artwork_x: int
+    artwork_y: int
+    rotation: float
+    output_prefix: str
+
+
+MOCKUPS: Dict[str, MockupConfig] = {
+    "mockup_30x40_tr": MockupConfig(
+        overlay_filename="mockup_30x40_tr.png",
+        artwork_width=2554,
+        artwork_height=3185,
+        artwork_x=1341,
+        artwork_y=2007,
+        rotation=7.43,
+        output_prefix="small",
+    ),
+    "mockup_60x80_tr": MockupConfig(
+        overlay_filename="mockup_60x80_tr.png",
+        artwork_width=5106,
+        artwork_height=6374,
+        artwork_x=144,
+        artwork_y=410,
+        rotation=7.3,
+        output_prefix="large",
+    ),
 }
 
-def process_webp_image(webp_path):
-    """Process a single webp image to create both mockup variants."""
+
+def _ensure_directory(path: Path) -> None:
+    """Create a directory if it does not already exist."""
+
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _load_webp(path: Path) -> Image.Image:
+    """Load a WEBP image as RGBA, raising an informative error on failure."""
+
     try:
-        artwork = Image.open(webp_path).convert("RGBA")
-    except Exception as e:
-        print(f"Error opening {webp_path}: {e}")
-        return
+        return Image.open(path).convert("RGBA")
+    except Exception as exc:  # pragma: no cover - Pillow errors are already informative
+        raise ValueError(f"Failed to open artwork '{path}': {exc}") from exc
 
-    # Remove the "img_" prefix from the filename, if present.
-    original_base = os.path.splitext(os.path.basename(webp_path))[0]
-    base_name = original_base[4:] if original_base.startswith("img_") else original_base
 
-    # Process each mockup type for this artwork
-    for key, config in mockups.items():
-        print(f"Processing {original_base} for {key}...")
+def _prepare_canvas() -> Image.Image:
+    """Return a blank RGBA canvas that matches the overlay size."""
 
-        # Create a blank canvas (white background) with PS dimensions
-        canvas = Image.new("RGBA", CANVAS_SIZE, (255, 255, 255, 255))
-        
-        # --- Rotate and Scale Artwork ---
-        # 1. Rotate the original artwork using the specified angle (clockwise) with expand=True.
-        rotated_artwork = artwork.rotate(config["rotation"], resample=Image.BICUBIC, expand=True)
-        
-        # 2. Compute the uniform scale so that the rotated artwork's bounding box
-        #    exactly matches the target dimensions.
-        scale_x = config["artwork_width"] / rotated_artwork.width
-        scale_y = config["artwork_height"] / rotated_artwork.height
-        scale = (scale_x + scale_y) / 2  # average scale for uniform scaling
-        
-        final_artwork = rotated_artwork.resize(
-            (int(rotated_artwork.width * scale), int(rotated_artwork.height * scale)),
-            resample=Image.LANCZOS
-        )
-        
-        # --- Positioning ---
-        # Calculate the center where the PS file expects the rotated artwork.
-        desired_center_x = config["artwork_x"] + config["artwork_width"] / 2
-        desired_center_y = config["artwork_y"] + config["artwork_height"] / 2
-        paste_x = int(desired_center_x - final_artwork.width / 2)
-        paste_y = int(desired_center_y - final_artwork.height / 2)
-        canvas.paste(final_artwork, (paste_x, paste_y), final_artwork)
-        
-        # --- Overlay Processing with Soft Multiply Blend ---
-        overlay_path = os.path.join(OVERLAYS_FOLDER, config["overlay_filename"])
-        try:
-            overlay = Image.open(overlay_path).convert("RGBA")
-        except Exception as e:
-            print(f"Error opening overlay {overlay_path}: {e}")
+    return Image.new("RGBA", CANVAS_SIZE, (255, 255, 255, 255))
+
+
+def _rotate_and_scale(artwork: Image.Image, config: MockupConfig) -> Image.Image:
+    """Rotate artwork and scale uniformly to the configured bounding box."""
+
+    rotated = artwork.rotate(config.rotation, resample=Image.BICUBIC, expand=True)
+    scale_x = config.artwork_width / rotated.width
+    scale_y = config.artwork_height / rotated.height
+    scale = (scale_x + scale_y) / 2
+    return rotated.resize(
+        (int(rotated.width * scale), int(rotated.height * scale)), resample=Image.LANCZOS
+    )
+
+
+def _apply_overlay(canvas: Image.Image, overlay: Image.Image) -> Image.Image:
+    """Blend an overlay with the canvas using a soft multiply and handle mask."""
+
+    overlay_resized = overlay.resize(CANVAS_SIZE, resample=Image.LANCZOS) if overlay.size != CANVAS_SIZE else overlay
+
+    canvas_rgb = canvas.convert("RGB")
+    overlay_rgb = overlay_resized.convert("RGB")
+
+    multiplied = ImageChops.multiply(canvas_rgb, overlay_rgb)
+    soft_blend = Image.blend(canvas_rgb, multiplied, SHADOW_OPACITY)
+
+    alpha_channel = overlay_resized.getchannel("A")
+    handle_mask = alpha_channel.point(lambda alpha: 255 if alpha >= 250 else 0)
+
+    return Image.composite(overlay_rgb, soft_blend, handle_mask)
+
+
+def render_mockup(
+    artwork: Image.Image,
+    config: MockupConfig,
+    overlay_dir: Path,
+) -> Image.Image:
+    """Render a single mockup for the provided artwork."""
+
+    canvas = _prepare_canvas()
+    positioned_artwork = _rotate_and_scale(artwork, config)
+
+    desired_center_x = config.artwork_x + config.artwork_width / 2
+    desired_center_y = config.artwork_y + config.artwork_height / 2
+    paste_x = int(desired_center_x - positioned_artwork.width / 2)
+    paste_y = int(desired_center_y - positioned_artwork.height / 2)
+    canvas.paste(positioned_artwork, (paste_x, paste_y), positioned_artwork)
+
+    overlay_path = overlay_dir / config.overlay_filename
+    try:
+        overlay = Image.open(overlay_path).convert("RGBA")
+    except Exception as exc:  # pragma: no cover - Pillow errors are already informative
+        raise ValueError(f"Failed to open overlay '{overlay_path}': {exc}") from exc
+
+    blended = _apply_overlay(canvas, overlay)
+    return blended.resize(OUTPUT_SIZE, resample=Image.LANCZOS)
+
+
+def _output_name(prefix: str, source: Path) -> str:
+    base_name = source.stem[4:] if source.stem.startswith("img_") else source.stem
+    return f"{prefix}_{base_name}.webp"
+
+
+def generate_mockups(
+    input_files: Iterable[Path],
+    overlay_dir: Path,
+    output_dir: Path,
+    mockups: Dict[str, MockupConfig] = MOCKUPS,
+) -> None:
+    """Generate every configured mockup for each provided artwork file."""
+
+    _ensure_directory(output_dir)
+
+    for webp_path in input_files:
+        if not webp_path.name.lower().endswith(".webp"):
+            logging.debug("Skipping non-WEBP file: %s", webp_path.name)
             continue
-        
-        # Ensure the overlay is the same size as the canvas.
-        if overlay.size != CANVAS_SIZE:
-            overlay = overlay.resize(CANVAS_SIZE, resample=Image.LANCZOS)
-        
-        # Convert canvas and overlay to RGB (for blend operations)
-        canvas_rgb = canvas.convert("RGB")
-        overlay_rgb = overlay.convert("RGB")
-        
-        # Compute full multiply blend (often too dark)
-        multiplied = ImageChops.multiply(canvas_rgb, overlay_rgb)
-        # Create a soft blend by blending the original canvas with the full multiply result
-        soft_blend = Image.blend(canvas_rgb, multiplied, SHADOW_OPACITY)
-        
-        # --- Masking the Handle Area ---
-        # The overlay contains a "handle" area that should remain 100% opaque.
-        # We use the alpha channel of the overlay: pixels with alpha >= 250 are considered handle.
-        alpha_channel = overlay.getchannel("A")
-        handle_mask = alpha_channel.point(lambda a: 255 if a >= 250 else 0)
-        
-        # Composite: in handle areas (mask=255), use the original overlay; elsewhere use the soft blend.
-        final_rgb = Image.composite(overlay_rgb, soft_blend, handle_mask)
-        
-        # Resize the final composite to the export dimensions.
-        final_image = final_rgb.resize(OUTPUT_SIZE, resample=Image.LANCZOS)
-        
-        # Naming convention: For 30x40 mockups use "small" prefix, for 60x80 use "large"
-        new_prefix = "small" if key == "mockup_30x40_tr" else "large"
-        output_filename = f"{new_prefix}_{base_name}.webp"
-        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
-        
-        final_image.save(output_path, "WEBP", quality=WEBP_QUALITY)
-        print(f"Saved mockup to {output_path}")
 
-def main():
-    # List and debug print the files found in the input folder.
+        logging.info("Processing %s", webp_path.name)
+        artwork = _load_webp(webp_path)
+
+        for key, config in mockups.items():
+            logging.debug("Rendering mockup variant %s", key)
+            final_image = render_mockup(artwork, config, overlay_dir)
+            output_path = output_dir / _output_name(config.output_prefix, webp_path)
+            final_image.save(output_path, "WEBP", quality=WEBP_QUALITY)
+            logging.info("Saved %s", output_path)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=DEFAULT_INPUT_FOLDER,
+        help="Directory containing source WEBP files (default: output_webp)",
+    )
+    parser.add_argument(
+        "--overlays",
+        type=Path,
+        default=DEFAULT_OVERLAY_FOLDER,
+        help="Directory containing overlay PNG files (default: overlays)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT_FOLDER,
+        help="Directory to write generated WEBP mockups (default: output2)",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging for debugging.",
+    )
+    return parser.parse_args()
+
+
+def _gather_input_files(input_dir: Path) -> Iterable[Path]:
+    if not input_dir.exists():
+        raise FileNotFoundError(f"Input directory '{input_dir}' does not exist")
+
+    return sorted(path for path in input_dir.iterdir() if path.is_file())
+
+
+def main() -> None:
+    args = parse_args()
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s: %(message)s")
+
     try:
-        files = os.listdir(INPUT_FOLDER)
-    except Exception as e:
-        print(f"Error accessing folder {INPUT_FOLDER}: {e}")
-        return
+        input_files = _gather_input_files(args.input)
+    except Exception as exc:
+        logging.error(exc)
+        raise SystemExit(1) from exc
 
-    print("Files in input folder:", files)
-    for filename in files:
-        if filename.lower().endswith(".webp") and filename.startswith("img_"):
-            file_path = os.path.join(INPUT_FOLDER, filename)
-            print(f"Processing file: {file_path}")
-            process_webp_image(file_path)
+    try:
+        generate_mockups(input_files, args.overlays, args.output)
+    except Exception as exc:
+        logging.error("Mockup generation failed: %s", exc)
+        raise SystemExit(1) from exc
+
 
 if __name__ == "__main__":
     main()
