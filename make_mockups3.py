@@ -11,7 +11,7 @@ from typing import Dict, Iterable
 
 from PIL import Image, ImageChops
 
-DEFAULT_INPUT_FOLDER = Path("output_webp")
+DEFAULT_INPUT_FOLDER = Path("input_img")
 DEFAULT_OVERLAY_FOLDER = Path("overlays")
 DEFAULT_OUTPUT_FOLDER = Path("output2")
 
@@ -19,6 +19,7 @@ CANVAS_SIZE = (5400, 7200)
 OUTPUT_SIZE = (1500, 2000)
 WEBP_QUALITY = 90
 SHADOW_OPACITY = 0.3
+ALLOWED_EXTENSIONS = {".webp", ".png", ".jpg", ".jpeg"}
 
 
 @dataclass(frozen=True)
@@ -62,8 +63,8 @@ def _ensure_directory(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def _load_webp(path: Path) -> Image.Image:
-    """Load a WEBP image as RGBA, raising an informative error on failure."""
+def _load_image(path: Path) -> Image.Image:
+    """Load an image as RGBA, raising an informative error on failure."""
 
     try:
         return Image.open(path).convert("RGBA")
@@ -147,18 +148,18 @@ def generate_mockups(
 
     _ensure_directory(output_dir)
 
-    for webp_path in input_files:
-        if not webp_path.name.lower().endswith(".webp"):
-            logging.debug("Skipping non-WEBP file: %s", webp_path.name)
+    for image_path in input_files:
+        if image_path.suffix.lower() not in ALLOWED_EXTENSIONS:
+            logging.debug("Skipping unsupported file: %s", image_path.name)
             continue
 
-        logging.info("Processing %s", webp_path.name)
-        artwork = _load_webp(webp_path)
+        logging.info("Processing %s", image_path.name)
+        artwork = _load_image(image_path)
 
         for key, config in mockups.items():
             logging.debug("Rendering mockup variant %s", key)
             final_image = render_mockup(artwork, config, overlay_dir)
-            output_path = output_dir / _output_name(config.output_prefix, webp_path)
+            output_path = output_dir / _output_name(config.output_prefix, image_path)
             final_image.save(output_path, "WEBP", quality=WEBP_QUALITY)
             logging.info("Saved %s", output_path)
 
@@ -169,7 +170,7 @@ def parse_args() -> argparse.Namespace:
         "--input",
         type=Path,
         default=DEFAULT_INPUT_FOLDER,
-        help="Directory containing source WEBP files (default: output_webp)",
+        help="Directory containing source image files (default: input_img)",
     )
     parser.add_argument(
         "--overlays",

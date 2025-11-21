@@ -24,20 +24,20 @@ pip install -r requirements.txt
 .
 ├── make_mockups3.py     # Main script
 ├── overlays/            # Overlay PNG assets (mockup_30x40_tr.png, mockup_60x80_tr.png)
-├── output_webp/         # Place your source WEBP files here (filenames starting with "img_")
+├── input_img/           # Place your source image files here (filenames starting with "img_")
 └── output2/             # Generated mockups are written here
 ```
 
 ## Usage
-1. Add your source artwork as WEBP files in `output_webp/` and prefix the filenames with `img_` (for example, `img_mountain.webp`). The prefix is removed in the final output names.
+1. Add your source artwork as WEBP, PNG, or JPG/JPEG files in `input_img/` and prefix the filenames with `img_` (for example, `img_mountain.webp`). The prefix is removed in the final output names.
 2. Run the script from the repository root:
 
 ```bash
-python make_mockups3.py --input output_webp --overlays overlays --output output2
+python make_mockups3.py --input input_img --overlays overlays --output output2
 ```
 
 Command-line options:
-- `--input`: Directory containing source WEBP files (default: `output_webp`).
+- `--input`: Directory containing source image files (default: `input_img`).
 - `--overlays`: Directory containing overlay PNG files (default: `overlays`).
 - `--output`: Directory to write generated WEBP files (default: `output2`).
 - `--verbose`: Enable debug-level logging.
